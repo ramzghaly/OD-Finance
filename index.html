@@ -237,6 +237,34 @@ async function start() {
       signInWithPassword: async (email, pw) => { await signInWithEmailAndPassword(auth, email, pw); try { await auth.currentUser.getIdToken(true); } catch (e) {} await new Promise(r => setTimeout(r, 800)); return !!(auth.currentUser && auth.currentUser.email === OWNER); },
       refresh: async () => { try { if (auth.currentUser) await auth.currentUser.getIdToken(true); } catch (e) {} },
       signOutOwner: async () => { if (auth.currentUser) await signOut(auth); },
+      restExport: async (cols, onProgress) => {
+        const base = "https://firestore.googleapis.com/v1/projects/" + CFG.projectId + "/databases/" + DBID + "/documents/";
+        const fromVal = v => {
+          if ("nullValue" in v) return null;
+          if ("booleanValue" in v) return v.booleanValue;
+          if ("integerValue" in v) return Number(v.integerValue);
+          if ("doubleValue" in v) return v.doubleValue;
+          if ("stringValue" in v) return v.stringValue;
+          if ("timestampValue" in v) return v.timestampValue;
+          if ("arrayValue" in v) return (v.arrayValue.values || []).map(fromVal);
+          if ("mapValue" in v) { const o = {}; const f = v.mapValue.fields || {}; for (const k in f) o[k] = fromVal(f[k]); return o; }
+          return null;
+        };
+        const out = {}; let n = 0;
+        for (const c of cols) {
+          let token = "";
+          do {
+            const idt = await auth.currentUser.getIdToken();
+            const res = await fetch(base + c + "?pageSize=100" + (token ? "&pageToken=" + encodeURIComponent(token) : ""), { headers: { "Authorization": "Bearer " + idt } });
+            if (!res.ok) { let t = ""; try { t = (await res.json()).error.message; } catch (e) {} const er = new Error("HTTP " + res.status + (t ? " — " + t : "") + " [" + c + "]"); er.code = res.status === 403 ? "permission-denied" : "http-" + res.status; throw er; }
+            const j = await res.json();
+            for (const d of (j.documents || [])) { const id = d.name.split("/").pop(); (out[c] = out[c] || {})[id] = fromVal({ mapValue: { fields: d.fields || {} } }); n++; }
+            if (onProgress) onProgress(n, c);
+            token = j.nextPageToken || "";
+          } while (token);
+        }
+        return out;
+      },
       restImport: async (items, onProgress) => {
         const base = "projects/" + CFG.projectId + "/databases/" + DBID + "/documents";
         const batches = []; let cur = [], size = 0;
@@ -439,13 +467,13 @@ function codeSetModal(chg){modal('<form id="codeSetF" data-chg="'+(chg?1:'')+'" 
 
 function ownerLogin(next){modal('<form id="ownF" data-next="'+next+'" style="display:contents"><h2>دخول صاحب السيستم</h2><p class="small muted">'+(next==='import'?'استيراد البيانات':'التكويد')+' متاح لصاحب السيستم فقط. ادخل بإيميل وكلمة مرور حسابك على Firebase.</p><label><span>الإيميل</span><input id="ow_mail" type="email" dir="ltr" required value="'+esc(usr.ownerEmail||'')+'"></label><label><span>كلمة المرور</span><input id="ow_pw" type="password" required autocomplete="current-password"></label><div class="err" id="ow_err"></div><div class="row"><button class="btn pri">دخول</button><button type="button" class="btn" data-act="closeM">إلغاء</button></div></form>');setTimeout(()=>{const p=$('#ow_pw');if(p)p.focus()},50)}
 async function exportData(){if(!codeOK||exportData.on)return;exportData.on=true;toast('جارٍ تجهيز النسخة الاحتياطية…');
-  try{const out={};let n=0;for(const [c,k] of [['sectors',1000],['depts',1000],['staff',5000],['pins',5000],['config',100],['recur',5000],['tasks',20000],['fchunks',20000]]){const r=await db.collection(c).limit(k).get();if(r.docs.length){out[c]={};r.docs.forEach(d=>{out[c][d.id]=d.data();n++})}}
+  try{if(!(await usr.isOwner()))throw new Error('سجّل الدخول بحساب صاحب السيستم من التكويد أولاً');const out=await usr.restExport(['sectors','depts','staff','pins','config','recur','tasks','fchunks'],(k,c)=>toast('جارٍ التصدير… '+k+' مستند'));const n=Object.values(out).reduce((a,o)=>a+Object.keys(o).length,0);
     const d=new Date(),stamp=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
     const name=(document.title||'backup').replace(/[^A-Za-z0-9\u0600-\u06FF_-]+/g,'-').replace(/-+/g,'-').replace(/^-+|-+$/g,'')+'-backup-'+stamp+'.json';
     const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
     if(dl)await dl.save({filename:name,data:blob});else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1500)}
     toast('تم تنزيل النسخة الاحتياطية: '+n+' مستند ('+Object.keys(out.staff||{}).length+' موظف، '+Object.keys(out.tasks||{}).length+' مهمة)')}
-  catch(e){console.error(e);toast('تعذر التصدير: '+(e&&(e.code||e.message)||''))}finally{exportData.on=false}}
+  catch(e){console.error(e);toast('تعذر التصدير: '+(e&&(e.message||e.code)||''))}finally{exportData.on=false}}
 function importModal(){modal('<h2>استيراد ملف البيانات</h2><p class="small muted">اختار ملف <b>wd-finance-data-light.json</b> أو <b>wd-finance-data.json</b>. الاستيراد بيضيف البيانات ويستبدل أي موظف أو مهمة ليهم نفس الرقم.</p><div class="row"><button type="button" class="btn pri" data-act="impPick" id="impPickBtn">اختيار ملف البيانات</button><button type="button" class="btn" data-act="closeM" id="impClose">إغلاق</button></div><div id="impProg" class="small" style="min-height:1.4em;font-weight:600"></div><progress id="impBar" value="0" max="1" style="width:100%" hidden></progress>')}
 async function importData(file){const say=(m,bad)=>{const b=$('#impProg')||$('#impMsg');if(b){b.textContent=m;b.style.color=bad?'var(--bad)':'var(--ok)'}else toast(m)};
   const withTimeout=(pr,ms)=>Promise.race([pr,new Promise((_,rej)=>setTimeout(()=>{const e=new Error('timeout');e.code='timeout';rej(e)},ms))]);
