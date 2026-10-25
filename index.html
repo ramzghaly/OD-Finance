@@ -164,7 +164,7 @@ window.WD_OWNER = "ramz.ghaly@gmail.com";
 <script type="module">
 /* ربط السيستم بقاعدة بيانات Firebase */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { initializeFirestore, doc, collection, getDoc, setDoc, deleteDoc, onSnapshot, query, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { initializeFirestore, doc, collection, getDoc, setDoc, deleteDoc, onSnapshot, query, limit, getDocs, orderBy, startAfter, documentId } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const OWNER = window.WD_OWNER;
@@ -237,6 +237,21 @@ async function start() {
       signInWithPassword: async (email, pw) => { await signInWithEmailAndPassword(auth, email, pw); try { await auth.currentUser.getIdToken(true); } catch (e) {} await new Promise(r => setTimeout(r, 800)); return !!(auth.currentUser && auth.currentUser.email === OWNER); },
       refresh: async () => { try { if (auth.currentUser) await auth.currentUser.getIdToken(true); } catch (e) {} },
       signOutOwner: async () => { if (auth.currentUser) await signOut(auth); },
+      sdkExport: async (cols, onProgress) => {
+        const out = {}; let n = 0;
+        for (const c of cols) {
+          let last = null;
+          for (;;) {
+            const q = last ? query(collection(fs, c), orderBy(documentId()), startAfter(last), limit(200)) : query(collection(fs, c), orderBy(documentId()), limit(200));
+            const s = await getDocs(q);
+            for (const d of s.docs) { (out[c] = out[c] || {})[d.id] = d.data(); n++; }
+            if (onProgress) onProgress(n, c);
+            if (s.docs.length < 200) break;
+            last = s.docs[s.docs.length - 1].id;
+          }
+        }
+        return out;
+      },
       restExport: async (cols, onProgress) => {
         const base = "https://firestore.googleapis.com/v1/projects/" + CFG.projectId + "/databases/" + DBID + "/documents/";
         const fromVal = v => {
@@ -467,7 +482,7 @@ function codeSetModal(chg){modal('<form id="codeSetF" data-chg="'+(chg?1:'')+'" 
 
 function ownerLogin(next){modal('<form id="ownF" data-next="'+next+'" style="display:contents"><h2>دخول صاحب السيستم</h2><p class="small muted">'+(next==='import'?'استيراد البيانات':'التكويد')+' متاح لصاحب السيستم فقط. ادخل بإيميل وكلمة مرور حسابك على Firebase.</p><label><span>الإيميل</span><input id="ow_mail" type="email" dir="ltr" required value="'+esc(usr.ownerEmail||'')+'"></label><label><span>كلمة المرور</span><input id="ow_pw" type="password" required autocomplete="current-password"></label><div class="err" id="ow_err"></div><div class="row"><button class="btn pri">دخول</button><button type="button" class="btn" data-act="closeM">إلغاء</button></div></form>');setTimeout(()=>{const p=$('#ow_pw');if(p)p.focus()},50)}
 async function exportData(){if(!codeOK||exportData.on)return;exportData.on=true;toast('جارٍ تجهيز النسخة الاحتياطية…');
-  try{if(!(await usr.isOwner()))throw new Error('سجّل الدخول بحساب صاحب السيستم من التكويد أولاً');const out=await usr.restExport(['sectors','depts','staff','pins','config','recur','tasks','fchunks'],(k,c)=>toast('جارٍ التصدير… '+k+' مستند'));const n=Object.values(out).reduce((a,o)=>a+Object.keys(o).length,0);
+  try{if(!(await usr.isOwner()))throw new Error('سجّل الدخول بحساب صاحب السيستم من التكويد أولاً');const C=['sectors','depts','staff','pins','config','recur','tasks','fchunks'],P=(k,c)=>toast('جارٍ التصدير… '+k+' مستند');let out;try{out=await usr.sdkExport(C,P)}catch(e1){console.warn(e1);try{out=await usr.restExport(C,P)}catch(e2){const e=new Error((e1&&(e1.code||e1.message))+' / '+(e2&&(e2.message||e2.code)));throw e}}const n=Object.values(out).reduce((a,o)=>a+Object.keys(o).length,0);
     const d=new Date(),stamp=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
     const name=(document.title||'backup').replace(/[^A-Za-z0-9\u0600-\u06FF_-]+/g,'-').replace(/-+/g,'-').replace(/^-+|-+$/g,'')+'-backup-'+stamp+'.json';
     const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
