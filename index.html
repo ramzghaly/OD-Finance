@@ -164,7 +164,7 @@ window.WD_OWNER = "ramz.ghaly@gmail.com";
 <script type="module">
 /* ربط السيستم بقاعدة بيانات Firebase */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { initializeFirestore, doc, collection, getDoc, setDoc, deleteDoc, onSnapshot, query, limit, getDocs, orderBy, startAfter, documentId } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, collection, getDoc, setDoc, deleteDoc, onSnapshot, query, limit, getDocs, orderBy, startAfter, documentId } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const OWNER = window.WD_OWNER;
@@ -204,7 +204,7 @@ async function start() {
     const app = initializeApp(CFG);
     const DBID = await detectDb();
     window.__fbDbId = DBID;
-    const fs = initializeFirestore(app, { ignoreUndefinedProperties: true, experimentalForceLongPolling: true, experimentalAutoDetectLongPolling: false }, DBID);
+    const fs = initializeFirestore(app, Object.assign({ ignoreUndefinedProperties: true, experimentalForceLongPolling: true, experimentalAutoDetectLongPolling: false }, (() => { try { return window.indexedDB ? { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) } : {}; } catch (e) { return {}; } })()), DBID);
     const auth = getAuth(app);
     const authReady = new Promise(res => { const un = onAuthStateChanged(auth, () => { un(); res(); }); });
 
@@ -511,7 +511,7 @@ async function exportData(){if(exportData.on)return;exportData.on=true;toast('ج
     const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
     if(dl)await dl.save({filename:name,data:blob});else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1500)}
     toast('تم تنزيل النسخة الاحتياطية: '+n+' مستند ('+Object.keys(out.staff||{}).length+' موظف، '+Object.keys(out.tasks||{}).length+' مهمة)')}
-  catch(e){console.error(e);toast('تعذر التصدير: '+(e&&(e.message||e.code)||''))}finally{exportData.on=false}}
+  catch(e){console.error(e);const m=(e&&(e.message||e.code))||'';toast(/quota|429|resource-exhausted/i.test(m)?'تعذر التصدير: الحد اليومي المجاني للقراءة من Firebase خلص النهارده. جرّب بكرة بعد الساعة 10 الصبح، أو فعّل الدفع (Blaze) في Firebase.':'تعذر التصدير: '+m)}finally{exportData.on=false}}
 function importModal(){modal('<h2>استيراد ملف البيانات</h2><p class="small muted">اختار ملف <b>wd-finance-data-light.json</b> أو <b>wd-finance-data.json</b>. الاستيراد بيضيف البيانات ويستبدل أي موظف أو مهمة ليهم نفس الرقم.</p><div class="row"><button type="button" class="btn pri" data-act="impPick" id="impPickBtn">اختيار ملف البيانات</button><button type="button" class="btn" data-act="closeM" id="impClose">إغلاق</button></div><div id="impProg" class="small" style="min-height:1.4em;font-weight:600"></div><progress id="impBar" value="0" max="1" style="width:100%" hidden></progress>')}
 async function importData(file){const say=(m,bad)=>{const b=$('#impProg')||$('#impMsg');if(b){b.textContent=m;b.style.color=bad?'var(--bad)':'var(--ok)'}else toast(m)};
   const withTimeout=(pr,ms)=>Promise.race([pr,new Promise((_,rej)=>setTimeout(()=>{const e=new Error('timeout');e.code='timeout';rej(e)},ms))]);
@@ -614,8 +614,8 @@ setInterval(schedGen,30*60*1000);
 
 /* ---------- writes ---------- */
 let busy=false;
-async function syncNow(){if(!db||syncNow.on)return;syncNow.on=true;const b=$('#syncBtn');if(b){b.disabled=true;b.textContent='جارٍ التحديث…'}
-  try{for(const [n,k] of [['sectors',500],['staff',1000],['tasks',1000],['recur',500],['depts',500],['pins',1000]]){const r=await db.collection(n).limit(k).get();if(H[n])H[n](r)}toast('تم تحديث البيانات')}catch(e){toast('تعذر التحديث الآن. حاول مرة أخرى.');chrome()}finally{syncNow.on=false}}
+async function syncNow(){if(!db||syncNow.on)return;if(!syncNow.dead&&staffReady&&tasksReady){lastSync=new Date();refresh();return toast('البيانات بتتحدّث تلقائياً أول بأول ✔')}syncNow.on=true;const b=$('#syncBtn');if(b){b.disabled=true;b.textContent='جارٍ التحديث…'}
+  try{for(const [n,k] of [['sectors',500],['staff',1000],['tasks',1000],['recur',500],['depts',500],['pins',1000]]){const r=await db.collection(n).limit(k).get();if(H[n])H[n](r)}syncNow.dead=false;toast('تم تحديث البيانات')}catch(e){toast('تعذر التحديث الآن. حاول مرة أخرى.');chrome()}finally{syncNow.on=false}}
 async function save(ref,data){if(busy)return false;busy=true;try{await ref.set(data);return true}catch(e){werr(e);return false}finally{busy=false}}
 const clone=o=>JSON.parse(JSON.stringify(o));
 function taskBody(t){const b=clone(t);delete b.id;return b}
@@ -706,7 +706,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#modal').hidden
 /* ---------- boot ---------- */
 async function boot(){view();const c=window.claude;if(!c||!c.use){view.tried=true;db=null;return view()}
   [db,usr]=await Promise.all([c.use('db'),c.use('user')]);view.tried=true;if(!db)return view();c.use('downloads').then(x=>{dl=x}).catch(()=>{});
-  const dead=()=>toast('انقطع الاتصال بالبيانات. أعد فتح الصفحة.');
+  const dead=e=>{syncNow.dead=true;const q=e&&(e.code==='resource-exhausted'||/quota|429/i.test(e.message||''));toast(q?'الحد اليومي المجاني لقاعدة البيانات خلص. السيستم هيرجع لوحده بكرة الساعة 10 الصبح، أو لما يتفعل الدفع في Firebase.':'انقطع الاتصال بالبيانات. أعد فتح الصفحة.')};
   db.collection('sectors').limit(500).onSnapshot(H.sectors=s=>{const d=s.docs.map(x=>[x.id,x.data()]).filter(x=>x[1]&&x[1].name).sort((a,b)=>(a[1].order||0)-(b[1].order||0)),m={},r={};d.forEach(x=>{m[x[0]]=x[1].name;r[x[0]]=x[1]});SECTORS=m;SECDATA=r;lastSync=new Date();refresh()},dead);
   db.collection('pins').limit(1000).onSnapshot(H.pins=s=>{const m={};s.docs.forEach(d=>{const x=d.data();if(x&&x.pin)m[d.id]=x});PINS=m},()=>{});
   db.collection('depts').limit(500).onSnapshot(H.depts=s=>{const m={};s.docs.forEach(d=>{const x=d.data();if(x&&x.name&&x.sector)m[d.id]=x});DEPTS=m;refresh()},dead);
