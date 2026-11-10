@@ -142,7 +142,7 @@ tr:last-child td{border-bottom:0}
 
 <div class="wrap">
   <header class="top">
-    <div class="brand"><h1>OD -Finance</h1><small>متابعة مهام القطاع المالي · <span class="num" title="رقم النسخة">نسخة 10/11 13:39</span></small></div>
+    <div class="brand"><h1>OD -Finance</h1><small>متابعة مهام القطاع المالي · <span class="num" title="رقم النسخة">نسخة 10/11 13:44</span></small></div>
     <div class="me" id="meBox" hidden></div>
   </header>
   <nav class="tabs" id="tabs" role="tablist" hidden></nav>
@@ -533,7 +533,7 @@ function doneModal(id){const t=tasks.find(x=>x.id===id),u=me();if(!t||!canAct(t,
   modal('<form id="doneF" data-id="'+id+'" style="display:contents"><h2>'+(s.final?'اعتماد وإغلاق المهمة':'انتهاء المهمة')+'</h2><p class="muted small">'+esc(t.title)+'</p>'+(prev?'<div><span class="small muted">تقييمك لعمل '+esc(pp?pp.name:'السابق')+' في هذه المهمة (من 1 إلى 10)</span><div class="scale" id="scale">'+[1,2,3,4,5,6,7,8,9,10].map(n=>'<button type="button" data-score="'+n+'" aria-pressed="false">'+n+'</button>').join('')+'</div><div id="scalePrev" style="text-align:start;margin-top:6px"></div></div>':'')+'<label><span>ملاحظات (اختياري)</span><textarea id="dn_note" maxlength="500"></textarea></label><div class="err" id="dn_err"></div><div class="row"><button class="btn pri">'+(s.final?'اعتماد وإغلاق':'تأكيد الانتهاء')+'</button><button type="button" class="btn" data-act="closeM">إلغاء</button></div></form>')}
 const canDel=(t,u)=>u.role==='head'||(t.createdBy===u.no&&t.status==='open');
 function delTaskModal(id){const t=tasks.find(x=>x.id===id),u=me();if(!t||!canDel(t,u))return;const n=t.chain.filter(s=>s.score!=null).length;
-  modal('<form id="deltF" data-id="'+id+'" style="display:contents"><h2>حذف المهمة</h2><p><span class="num muted">T-'+esc(t.no)+'</span> · '+esc(t.title)+'</p>'+(n?'<div class="note">المهمة عليها <span class="num">'+n+'</span> تقييم. حذفها يحذف هذه التقييمات من نجوم أصحابها.</div>':'')+'<p>الحذف نهائي ويشمل سجل الحركة، ولا يمكن التراجع عنه.</p><div class="row"><button class="btn danger">حذف نهائي</button><button type="button" class="btn" data-act="closeM">إلغاء</button></div></form>')}
+  modal('<form id="deltF" data-id="'+id+'" style="display:contents"><h2>حذف المهمة</h2><p><span class="num muted">T-'+esc(t.no)+'</span> · '+esc(t.title)+'</p>'+(n?'<div class="note">المهمة عليها <span class="num">'+n+'</span> تقييم. حذفها يحذف هذه التقييمات من نجوم أصحابها.</div>':'')+'<p>الحذف نهائي ويشمل سجل الحركة، ولا يمكن التراجع عنه.</p>'+(t.recur&&recurs.some(r=>r.id===t.recur)?'<label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="dt_rec" checked style="width:auto"><span>إيقاف المهمة المتكررة نهائياً (مش هتتعمل تاني '+esc(REP[t.rep]||'')+')</span></label>':'')+'<div class="row"><button class="btn danger">حذف نهائي</button><button type="button" class="btn" data-act="closeM">إلغاء</button></div></form>')}
 const MAXF=3*1024*1024,CH=180000;let pendTask=null,curFile=null,dl=null;
 const fsz=n=>n<1048576?Math.max(1,Math.round(n/1024))+' KB':(n/1048576).toFixed(1)+' MB';
 const canFwd=(t,u)=>t.status==='open'&&t.cur===0&&t.chain[0].who===u.no&&assignees(u,t.sector).length>0;
@@ -648,7 +648,7 @@ document.addEventListener('submit',async e=>{e.preventDefault();const f=e.target
     pre.push(...midSteps(t.sector,to,lv(u)));
     t.chain=pre.concat(t.chain);t.cur=0;t.log.push({at:now,by:u.no,act:'fwd',note:'إلى '+to.name+(note?' — '+note:'')});
     if(await save(db.doc('tasks/'+t.id),taskBody(t))){closeM();toast('تم تحويل المهمة إلى '+to.name);mailModal(t,to,u)}}
-  else if(f.id==='deltF'&&u){const o=tasks.find(x=>x.id===f.dataset.id);if(!o||!canDel(o,u)||busy)return closeM();busy=true;try{await db.doc('tasks/'+o.id).delete();for(const f of o.files||[])safeDrop(f,o.id);open.delete(o.id);closeM();toast('تم حذف المهمة T-'+o.no)}catch(err){werr(err)}finally{busy=false}}
+  else if(f.id==='deltF'&&u){const o=tasks.find(x=>x.id===f.dataset.id);if(!o||!canDel(o,u)||busy)return closeM();busy=true;try{const rc=$('#dt_rec')&&$('#dt_rec').checked?recurs.find(r=>r.id===o.recur):null;await db.doc('tasks/'+o.id).delete();if(rc){await db.doc('recur/'+rc.id).delete();recurs=recurs.filter(r=>r!==rc)}for(const f of o.files||[])safeDrop(f,o.id);if(rc)for(const f of rc.files||[])if(!(o.files||[]).some(x=>x.id===f.id))safeDrop(f,o.id);open.delete(o.id);closeM();toast('تم حذف المهمة T-'+o.no+(rc?' وإيقاف تكرارها نهائياً':''))}catch(err){werr(err)}finally{busy=false}}
   else if(f.id==='editF'&&u){const o=tasks.find(x=>x.id===f.dataset.id);if(!o||o.status!=='open'||!(o.createdBy===u.no||u.role==='head'))return closeM();const t=clone(o),ch=[];
     const nv={title:$('#et_title').value.trim(),desc:$('#et_desc').value.trim(),due:$('#et_due').value,prio:$('#et_prio').value};
     if(nv.title!==t.title)ch.push('العنوان');if(nv.desc!==(t.desc||''))ch.push('التفاصيل');if(nv.due!==t.due)ch.push('الاستحقاق من '+fD(t.due)+' إلى '+fD(nv.due));if(nv.prio!==t.prio)ch.push('الأولوية');
